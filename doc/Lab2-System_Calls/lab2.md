@@ -206,7 +206,15 @@ sys_trace(void){
 
 mask 解决了，接下来解决如何监控的问题。
 
-我们需要知道，trace 要做的，是每当 mask 指明的系统调用被调用时，进行一次打印，问题就转化为了何时调用 打印，即在哪里进行插桩。如果在每一个系统调用里都进行插桩，如果 mask 符合就打印，反之不调用，当然是能够解决问题的，不过这肯定不是最终解，太憨了。实际上，所有的系统调用均有一个统一的入口，只要在该入口处进行插桩即可。
+我们需要知道，trace 要做的，是每当 mask 指明的系统调用被调用时，进行一次打印，问题就转化为了何时调用 打印，即在哪里进行插桩。如果在每一个系统调用里都进行插桩，如果 mask 符合就打印，反之不调用，当然是能够解决问题的，不过这肯定不是最终解，太憨了。实际上，所有的系统调用均有一个统一的入口，只要在该入口处进行插桩即可。插装之前，由于需要打印函数调用的名称，而proc结构体里的name是整个进程的名字，所以我们不能用p->name，而要自己定义一个数组。由于系统调用号从1开始，所以我们将数组中的第0个元素置为空。
+```c
+static char *syscall_names[] = {
+  "", "fork", "exit", "wait", "pipe", 
+  "read", "kill", "exec", "fstat", "chdir", 
+  "dup", "getpid", "sbrk", "sleep", "uptime", 
+  "open", "write", "mknod", "unlink", "link", 
+  "mkdir", "close", "trace", "sysinfo",};
+```
 
 系统调用的统一入口为函数 syscall，通过其代码可知，该函数读取 p->trapframe->a7 中存的系统调用编号，来跳转到对应的系统调用，因此在此处插桩即可，代码如下：
 
@@ -235,7 +243,47 @@ syscall(void)
 }
 ```
 
-实现完毕后，需要将 sys_trace 系统调用注册进去，具体步骤如第一小节所示，这里不再赘述。根据实验要求，我们要实现用户态的 trace 命令。实际上，`user/trace.c` 已经写好了， 不用我们来完成。因此，lab2 到这就完成了。运行结果：
+实现完毕后，需要将 sys_trace 系统调用注册进去，具体步骤如第一小节所示，这里不再赘述。根据实验要求，我们要实现用户态的 trace 命令。实际上，`user/trace.c` 已经写好了， 不用我们来完成。因此，lab2 到这就完成了。
+
+`user/trace.c` 代码如下：
+```c
+#include "kernel/param.h"
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+int
+main(int argc, char *argv[])
+{
+  int i;
+  char *nargv[MAXARG];
+
+  if(argc < 3 || (argv[1][0] < '0' || argv[1][0] > '9')){
+    fprintf(2, "Usage: %s mask command\n", argv[0]);
+    exit(1);
+  }
+
+  if (trace(atoi(argv[1])) < 0) {
+    fprintf(2, "%s: trace failed\n", argv[0]);
+    exit(1);
+  }
+  
+  for(i = 2; i < argc && i < MAXARG; i++){
+    nargv[i-2] = argv[i];
+  }
+  exec(nargv[0], nargv);
+  exit(0);
+}
+```
+再将$U/_trace添加到Makefile中的UPROGS里
+```c
+UPROGS=\
+  ...
+  $U/_trace\
+```
+
+
+运行结果：
 
 ```shell
 $ trace 32 grep hello README
